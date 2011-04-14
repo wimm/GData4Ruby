@@ -1,4 +1,6 @@
 #=CHANGELOG
+#==version 0.1.6
+#* Save the 'S'-cookie and send it with future requests to avoid '302 Redirect' responses
 #==version 0.1.5
 #* Changed license to LGPLv3
 #==version 0.1.4
