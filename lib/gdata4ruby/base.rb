@@ -70,6 +70,7 @@ module GData4Ruby
     @auth_token = nil
     @debug = false
     @gdata_version = '2.1'
+    @session_cookie = nil
 
     #Contains the ProxyInfo object for using a proxy server
     attr_accessor :proxy_info
@@ -99,6 +100,8 @@ module GData4Ruby
     def do_request(request)
       ret = nil
       add_auth_header(request)
+      # Add the session cookie if available
+      request.headers.merge!({'Cookie' => @session_cookie}) if @session_cookie
       http = get_http_object(request.url)
       puts "Sending request\nHeader: #{request.headers.inspect.to_s}\nContent: #{request.content.to_s}\n" if @debug
       http.start do |ht|
@@ -113,7 +116,20 @@ module GData4Ruby
             ht.delete(request.url.to_s, request.headers)
         end
       end
-      
+
+      if @debug
+        puts "Response code: #{ret.code}"
+        puts "Headers: \n"
+        ret.each { |h, v| puts "#{h}:#{v}" }
+        puts "Body: \n" + ret.read_body
+      end
+
+      # Save the session cookie if set
+      ret.get_fields('set-cookie').to_a.each do |header|
+        cookie = header.split(';').first
+        @session_cookie = cookie if cookie =~ /^S=.+/
+      end
+
       while ret.is_a?(Net::HTTPRedirection)
         puts "Redirect received, resending request" if @debug
         request.parameters = nil
@@ -125,7 +141,6 @@ module GData4Ruby
         puts "invalid response received: "+ret.code if @debug
         raise HTTPRequestFailed, ret.body
       end
-      puts "20x response received\nResponse: \n"+ret.read_body if @debug
       return ret
     end
 
