@@ -23,8 +23,11 @@ require 'cgi'
 require 'gdata4ruby/request'
 require 'gdata4ruby/utils/utils'
 require 'rexml/document'
+require 'rexml/document'
+require 'em-synchrony'
+require 'em-synchrony/em-http'
 
-Net::HTTP.version_1_2
+#Net::HTTP.version_1_2
 
 # GData4Ruby is a full featured wrapper for the base google data API
 
@@ -66,6 +69,7 @@ module GData4Ruby
 
   class Base
     AUTH_URL = "https://www.google.com/accounts/ClientLogin"
+    MAX_REDIRECTS = 10
     @proxy_info = nil
     @auth_token = nil
     @debug = false
@@ -98,66 +102,48 @@ module GData4Ruby
     private
 
     def do_request(request)
-      ret = nil
+      client = nil      
       add_auth_header(request)
+
       # Add the session cookie if available
       request.headers.merge!({'Cookie' => @session_cookie}) if @session_cookie
-      http = get_http_object(request.url)
+      
+      connection = EventMachine::HttpRequest.new(request.url.to_s, :head => request.headers)
       puts "Sending request\nHeader: #{request.headers.inspect.to_s}\nContent: #{request.content.to_s}\n" if @debug
-      http.start do |ht|
-        ret = case request.type
-          when :get
-            ht.get(request.url.to_s, request.headers)
-          when :post
-            ht.post(request.url.to_s, request.content, request.headers)
-          when :put
-            ht.put(request.url.to_s, request.content, request.headers)
-          when :delete
-            ht.delete(request.url.to_s, request.headers)
-        end
-      end
 
+      client = case request.type
+        when :get
+          connection.get(:head => request.headers, :redirects => MAX_REDIRECTS)
+        when :post
+          connection.post(:body => request.content, :head => request.headers, :redirects => MAX_REDIRECTS)
+        when :put
+          connection.put(:body => request.content, :head => request.headers, :redirects => MAX_REDIRECTS)
+        when :delete
+          connection.delete(:head => request.headers, :redirects => MAX_REDIRECTS)
+      end
+      
+      
       if @debug
-        puts "Response code: #{ret.code}"
+        puts "Response code: #{client.response_header.status}"
         puts "Headers: \n"
-        ret.each { |h, v| puts "#{h}:#{v}" }
-        puts "Body: \n" + ret.read_body
+        puts client.response_header.inspect
+        puts "Body: \n" + client.response
       end
 
       # Save the session cookie if set
-      ret.get_fields('set-cookie').to_a.each do |header|
+      client.cookies.each do |header|
         cookie = header.split(';').first
         @session_cookie = cookie if cookie =~ /^S=.+/
       end
-
-      while ret.is_a?(Net::HTTPRedirection)
-        puts "Redirect received, resending request" if @debug
-        request.parameters = nil
-        request.url = ret['location']
-        puts "sending #{request.type} to url = #{request.url.to_s}" if @debug
-        ret = do_request(request)
+      
+      if not client.error.empty?
+        puts "invalid response received: "+client.response_header.status if @debug
+        raise HTTPRequestFailed, client.response
       end
-      if not ret.is_a?(Net::HTTPSuccess)
-        puts "invalid response received: "+ret.code if @debug
-        raise HTTPRequestFailed, ret.body
-      end
-      return ret
+      
+      return client
     end
 
-    def get_http_object(location)
-      if @proxy_info and @proxy_info.address
-	     http = Net::HTTP.new(location.host, location.port, @proxy_info.address, @proxy_info.port, @proxy_info.username, @proxy_info.password)
-      else
-	     http = Net::HTTP.new(location.host, location.port)
-	    end
-      if location.scheme == 'https'
-        #fixed http/http misnaming via JohnMetta
-        puts "SSL True" if @debug
-        http.use_ssl = true
-        http.verify_mode = OpenSSL::SSL::VERIFY_NONE
-      end
-      return http
-    end
     
     def add_auth_header(request)
       if @auth_token
@@ -166,6 +152,13 @@ module GData4Ruby
         else 
           content_type = (request.type == :get or request.type == :delete) ? 'application/x-www-form-urlencoded' : 'application/atom+xml'
           request.headers = {'Authorization' => "GoogleLogin auth=#{@auth_token}", "GData-Version" => @gdata_version, 'Content-Type' => content_type}
+        end
+      else
+        request.headers = {} if request.headers.nil?
+        
+        if request.type == :put or request.type == :post
+          # Auth requests are failing without this. TODO: Rationalize the content type for the various requests.
+          request.headers.merge!({'Content-type' => 'application/x-www-form-urlencoded'})
         end
       end
     end

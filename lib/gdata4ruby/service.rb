@@ -41,10 +41,10 @@ module GData4Ruby
     # Thanks to David King and Scott Taylor for Ruby 1.9 fix.
     def authenticate(username, password, service)
       @auth_token = nil
-      ret = nil
-      ret = send_request(Request.new(:post, AUTH_URL, "Email=#{username}&Passwd=#{password}&source=GCal4Ruby&service=#{service}&accountType=HOSTED_OR_GOOGLE"))
-      if ret.class == Net::HTTPOK
-        body = ret.read_body
+      client = nil
+      client = send_request(Request.new(:post, AUTH_URL, "Email=#{username}&Passwd=#{password}&source=GCal4Ruby&service=#{service}&accountType=HOSTED_OR_GOOGLE"))
+      if client.response_header.status == 200
+        body = client.response
         lines = body.send(body.respond_to?(:lines) ? :lines : :to_s).to_a
         @auth_token = lines.to_a[2].gsub("Auth=", "").strip
         @account = username

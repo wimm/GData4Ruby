@@ -149,12 +149,13 @@ module GData4Ruby
     
     #Saves the object if it exsits, otherwise creates it.
     def save
+      client = nil
       if @exists
-        ret = service.send_request(Request.new(:put, @edit_uri, to_xml))
+        client = service.send_request(Request.new(:put, @edit_uri, to_xml))
       else
-        ret = create
+        client = create
       end
-      if not ret or not load(ret.read_body)
+      if not client.error.empty? or not load(client.response)
         raise SaveFailed, 'Could not save object'
       end
       return true
